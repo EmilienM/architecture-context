@@ -10,6 +10,7 @@ PIPELINE_PHASES = (
     "static-analysis",
     "generate-architecture",
     "generate-platform-architecture",
+    "generate-index",
     "generate-diagrams",
 )
 
@@ -89,6 +90,95 @@ def _add_strace_flag(parser):
         action="store_true",
         default=False,
         help="Run agents under strace (output to logs/strace/)",
+    )
+
+def _add_simple_generation_flag(parser):
+    """Add --simple-generation flag to a subparser."""
+    parser.add_argument(
+        "--simple-generation",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+
+
+def _add_agent_options(parser, help_scope: str = "agent phases"):
+    """Add harness/model selection shared by agent-backed commands."""
+    parser.add_argument(
+        "--harness",
+        choices=["claude", "codex"],
+        default="claude",
+        help=f"Agent harness to use for {help_scope} (default: claude)",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Model understood by the selected harness. Defaults to opus for "
+            "Claude and the configured Codex default for Codex."
+        ),
+    )
+
+
+def _add_claude_run_limits(parser):
+    """Add optional Claude limits to a directly agent-backed phase."""
+    parser.add_argument(
+        "--max-agent-turns",
+        type=int,
+        default=None,
+        help=(
+            "Maximum Claude SDK turns per agent. The Claude harness rejects "
+            "values below 1; unsupported by Codex."
+        ),
+    )
+    parser.add_argument(
+        "--max-budget-usd",
+        type=float,
+        default=None,
+        help=(
+            "Maximum Claude API-equivalent spend per agent. The Claude "
+            "harness rejects values at or below zero; unsupported by Codex."
+        ),
+    )
+
+
+def _add_structured_synthesis_options(parser):
+    """Add the opt-in bounded structured component route."""
+    parser.add_argument(
+        "--structured-synthesis",
+        action="store_true",
+        default=False,
+        help=(
+            "Use the private bounded JSON synthesis seam; does not publish "
+            "component artifacts (default: disabled)"
+        ),
+    )
+    parser.add_argument(
+        "--structured-inputs",
+        help="Parent-authored JSON evidence and authority input for the opt-in route",
+    )
+    parser.add_argument(
+        "--structured-total-calls",
+        type=int,
+        default=3,
+        help="Maximum model calls per component on the structured route (default: 3)",
+    )
+    parser.add_argument(
+        "--structured-evidence-followups",
+        type=int,
+        default=1,
+        help="Maximum structured evidence follow-ups per component (default: 1)",
+    )
+    parser.add_argument(
+        "--structured-repairs",
+        type=int,
+        default=1,
+        help="Maximum malformed-response repairs per component (default: 1)",
+    )
+    parser.add_argument(
+        "--structured-refresh",
+        action="store_true",
+        default=False,
+        help="Force an explicit structured reuse miss (default: disabled)",
     )
 
 
@@ -249,16 +339,7 @@ def parse_args():
         action="store_true",
         help="Re-run discovery even if component-map.json already exists"
     )
-    discover_parser.add_argument(
-        "--model",
-        choices=["sonnet", "opus", "haiku"],
-        default="opus",
-        help=(
-            "Claude model to use for discovery"
-            " (default: opus -- discovery explores"
-            " many repos and needs large context)"
-        ),
-    )
+    _add_agent_options(discover_parser, "discovery")
     _add_strace_flag(discover_parser)
 
     # Phase 2c: Static analysis (arch-analyzer)
@@ -374,12 +455,9 @@ def parse_args():
             " name or Makefile."
         ),
     )
-    generate_arch_parser.add_argument(
-        "--model",
-        choices=["sonnet", "opus", "haiku"],
-        default="opus",
-        help="Claude model to use (default: opus)"
-    )
+    _add_agent_options(generate_arch_parser, "architecture generation")
+    _add_claude_run_limits(generate_arch_parser)
+    _add_structured_synthesis_options(generate_arch_parser)
     generate_arch_parser.add_argument(
         "--tier",
         choices=["all", "significant", "core"],
@@ -429,19 +507,36 @@ def parse_args():
         default=False,
         help="Force regeneration of PLATFORM.md even if up-to-date"
     )
-    platform_arch_parser.add_argument(
-        "--model",
-        choices=["sonnet", "opus", "haiku"],
-        default="opus",
-        help=(
-            "Claude model to use (default: opus --"
-            " platform aggregation needs"
-            " large context)"
-        ),
-    )
+    _add_agent_options(platform_arch_parser, "platform architecture generation")
     _add_strace_flag(platform_arch_parser)
 
-    # Phase 5: Generate diagrams
+    # Deterministic index between platform architecture and diagrams
+    index_parser = subparsers.add_parser(
+        "generate-index",
+        help="Generate a deterministic INDEX.md for one architecture version",
+    )
+    index_parser.add_argument(
+        "--architecture-dir",
+        default="architecture",
+        help="Base architecture directory (default: architecture)",
+    )
+    index_parser.add_argument(
+        "--platform",
+        required=True,
+        help="Exact version directory containing component-map.json",
+    )
+    index_parser.add_argument(
+        "--platforms-file",
+        default="platforms.yaml",
+        help="Optional version-scoped integration configuration",
+    )
+    index_parser.add_argument(
+        "--overlays-dir",
+        default="overlays",
+        help="Directory containing human-authored overlay metadata",
+    )
+
+    # Phase 6: Generate diagrams
     diagrams_parser = subparsers.add_parser(
         "generate-diagrams",
         help="Generate diagrams for architecture files that need them"
@@ -489,12 +584,7 @@ def parse_args():
         default=False,
         help="Export Mermaid diagrams to PNG (requires mmdc + Chrome; off by default)"
     )
-    diagrams_parser.add_argument(
-        "--model",
-        choices=["sonnet", "opus", "haiku"],
-        default="opus",
-        help="Claude model to use (default: opus)"
-    )
+    _add_agent_options(diagrams_parser, "diagram generation")
     _add_strace_flag(diagrams_parser)
 
     # Check eligibility
@@ -563,6 +653,16 @@ def parse_args():
         help="Base architecture directory (default: architecture)"
     )
     pipeline_parser.add_argument(
+        "--platforms-file",
+        default="platforms.yaml",
+        help="Platform configuration used by generate-index",
+    )
+    pipeline_parser.add_argument(
+        "--overlays-dir",
+        default="overlays",
+        help="Overlay metadata directory used by generate-index",
+    )
+    pipeline_parser.add_argument(
         "--checkouts-dir",
         default="checkouts",
         help="Base checkout directory (default: checkouts)"
@@ -589,12 +689,8 @@ def parse_args():
         default=1,
         help="Maximum concurrency for component phases (default: 1)"
     )
-    pipeline_parser.add_argument(
-        "--model",
-        choices=["sonnet", "opus", "haiku"],
-        default="opus",
-        help="Claude model to use for agent phases (default: opus)"
-    )
+    _add_agent_options(pipeline_parser)
+    _add_structured_synthesis_options(pipeline_parser)
     pipeline_parser.add_argument(
         "--log-dir",
         help=(
@@ -640,6 +736,11 @@ def parse_args():
         ),
     )
     _add_strace_flag(pipeline_parser)
+    pipeline_parser.add_argument(
+        "--pull",
+        action="store_true",
+        help="Pull latest changes in existing repos during fetch phase"
+    )
 
     # All phases
     all_parser = subparsers.add_parser(
@@ -682,12 +783,8 @@ def parse_args():
             " name or Makefile."
         ),
     )
-    all_parser.add_argument(
-        "--model",
-        choices=["sonnet", "opus", "haiku"],
-        default="opus",
-        help="Claude model to use for all agent tasks (default: opus)"
-    )
+    _add_agent_options(all_parser, "all agent tasks")
+    _add_structured_synthesis_options(all_parser)
     all_parser.add_argument(
         "--tier",
         choices=["all", "significant", "core"],
@@ -745,5 +842,9 @@ def parse_args():
         ),
     )
     _add_strace_flag(all_parser)
+
+    _add_simple_generation_flag(parser)
+    _add_simple_generation_flag(all_parser)
+    _add_simple_generation_flag(pipeline_parser)
 
     return parser.parse_args()

@@ -23,6 +23,28 @@ func TestInputMergesCRDVersionsIntoCanonicalRow(t *testing.T) {
 	}
 }
 
+func TestInputKeepsResourceAndNonResourceRBACRulesDistinct(t *testing.T) {
+	document := Input(model.Input{
+		RBAC: model.RBAC{ClusterRoles: []model.Role{{
+			Name: "reader",
+			Rules: []model.RoleRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+				{NonResourceURLs: []string{"/metrics"}, Verbs: []string{"get"}},
+			},
+		}}},
+	}, Options{})
+
+	if len(document.ClusterRoles) != 2 {
+		t.Fatalf("cluster roles = %#v, want distinct resource and non-resource rows", document.ClusterRoles)
+	}
+	if document.ClusterRoles[0].Resources != "pods" || document.ClusterRoles[0].NonResourceURLs != "" {
+		t.Fatalf("resource row = %#v", document.ClusterRoles[0])
+	}
+	if document.ClusterRoles[1].Resources != "" || document.ClusterRoles[1].NonResourceURLs != "/metrics" {
+		t.Fatalf("non-resource row = %#v", document.ClusterRoles[1])
+	}
+}
+
 func TestInputClassifiesCRDAPIRoles(t *testing.T) {
 	document := Input(model.Input{
 		Component: "kueue",
@@ -332,6 +354,49 @@ func TestInputBuildsRepoLineageFromComponentMap(t *testing.T) {
 	}
 }
 
+func TestInputUsesComponentMapAliasForCanonicalRepository(t *testing.T) {
+	document := Input(model.Input{
+		Component: "policy",
+		Repo:      "https://github.com/praxis-proxy/policy.git",
+	}, Options{
+		ComponentMap: &model.ComponentMap{
+			Components: map[string]model.ComponentEntry{
+				"praxis-policy": {
+					RepoOrg:  "praxis-proxy",
+					RepoName: "policy",
+					RepoURL:  "https://github.com/praxis-proxy/policy",
+				},
+			},
+		},
+	})
+
+	if document.Component != "praxis-policy" {
+		t.Fatalf("Component = %q, want component-map alias", document.Component)
+	}
+}
+
+func TestInputKeepsRepositoryNameWhenComponentMapIdentityIsAmbiguous(t *testing.T) {
+	document := Input(model.Input{
+		Component: "policy",
+		Repo:      "git@github.com:praxis-proxy/policy.git",
+	}, Options{
+		ComponentMap: &model.ComponentMap{
+			Components: map[string]model.ComponentEntry{
+				"praxis-policy": {
+					RepoOrg: "praxis-proxy", RepoName: "policy",
+				},
+				"praxis-policy-secondary": {
+					RepoOrg: "praxis-proxy", RepoName: "policy",
+				},
+			},
+		},
+	})
+
+	if document.Component != "policy" {
+		t.Fatalf("Component = %q, want unchanged ambiguous repository name", document.Component)
+	}
+}
+
 func TestInputRepoLineageUpstreamRoleForOriginRepo(t *testing.T) {
 	document := Input(model.Input{
 		Component: "llm-d-kv-cache",
@@ -546,5 +611,30 @@ func TestInputDeterministicallySortsIntegrationTies(t *testing.T) {
 	}
 	if document.IntegrationPoints[0].Purpose != "AlphaReconciler" || document.IntegrationPoints[1].Purpose != "ZuluReconciler" {
 		t.Fatalf("integration points = %#v, want full-row deterministic ordering", document.IntegrationPoints)
+	}
+}
+
+func TestInputProjectsBehavioralEvidenceAndPreservesSourceRange(t *testing.T) {
+	document := Input(model.Input{
+		Component: "operator",
+		BehavioralEvidence: []model.BehavioralEvidence{{
+			Kind: "conditional-metrics-enforcement", Status: "observed",
+			Identity: "controller-runtime metrics", ServingSurface: "controller-runtime metrics serving surface",
+			ConfigurationBranch: "config.MetricsSecure is true", EnforcementProvider: "filters.WithAuthenticationAndAuthorization",
+			Source: "cmd/main.go:485-500",
+		}},
+	}, Options{})
+
+	if len(document.BehavioralEvidence) != 1 || document.BehavioralEvidence[0].ConfigurationBranch != "config.MetricsSecure is true" {
+		t.Fatalf("behavioral evidence = %#v, want projected branch", document.BehavioralEvidence)
+	}
+	found := false
+	for _, source := range document.Sources {
+		if source.File == "cmd/main.go" && source.Lines == "485-500" && source.Sections == "Behavioral Evidence" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("sources = %#v, want bounded Behavioral Evidence provenance", document.Sources)
 	}
 }

@@ -13,6 +13,8 @@ docs/*
 !docs/goals/**
 !docs/bugs/
 !docs/bugs/**
+!docs/decisions/
+!docs/decisions/**
 !docs/notes/
 !docs/notes/**
 !docs/milestones/
@@ -20,6 +22,11 @@ docs/*
 !docs/tasks/
 !docs/tasks/**
 tmp/
+
+# Private structured-generation state; accepted facts publish through the four-file core.
+architecture/*/.generation/structured/
+architecture/*/.generation/structured-publication-locks/
+architecture/*/*/.generation/structured/
 
 # Python
 __pycache__/

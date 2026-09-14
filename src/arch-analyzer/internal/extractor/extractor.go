@@ -106,6 +106,7 @@ func Extract(root string, options Options) (model.Input, error) {
 	input.RuntimeSecurity = append(input.RuntimeSecurity, sourceFacts.RuntimeSecurity...)
 	input.RuntimeProxies = append(input.RuntimeProxies, sourceFacts.RuntimeProxies...)
 	input.RuntimeWebhooks = append(input.RuntimeWebhooks, sourceFacts.RuntimeWebhooks...)
+	input.BehavioralEvidence = append(input.BehavioralEvidence, sourceFacts.BehavioralEvidence...)
 	input.AccessPolicies = append(input.AccessPolicies, sourceFacts.AccessPolicies...)
 	input.ComponentRefs = append(input.ComponentRefs, sourceFacts.ComponentRefs...)
 	input.Entrypoints = append(input.Entrypoints, sourceFacts.Entrypoints...)
@@ -186,12 +187,14 @@ func Extract(root string, options Options) (model.Input, error) {
 	classifyDependencyRoles(&input)
 	input.Authentication = append(input.Authentication, expandSupplementalAuth(input.GRPCServices, options.SupplementalAuth)...)
 	input.SecurityEvidence = dedupeSecurityEvidence(input.SecurityEvidence)
-	input.CategoryCoverage = categoryCoverage(absoluteRoot, input)
+	input.CategoryCoverage, input.ScanStatistics = categoryCoverageWithStatistics(absoluteRoot, input)
 	input.CrossReferences = crossReferences(input)
 	input.CoverageFindings = coverageFindings(input)
 	input.SynthesisEvidence = synthesisEvidence(input)
 	input.CrossCuttingEvidence = crossCuttingEvidence(input)
 	input.GapEvidenceIndex = gapEvidenceIndex(input)
+	sortEntrypoints(input.Entrypoints)
+	sortIntegrationPoints(input.IntegrationPoints)
 	return input, nil
 }
 

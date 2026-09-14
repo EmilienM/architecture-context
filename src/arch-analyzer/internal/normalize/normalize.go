@@ -26,12 +26,13 @@ func Input(input model.Input, options Options) model.Document {
 
 	sources := newSourceIndex()
 	document := model.Document{
-		Component:            input.Component,
+		Component:            componentMapKey(input, options.ComponentMap),
 		Purpose:              valueOr(input.Summary, "Pending synthesis from source-backed facts."),
 		DataCoverage:         input.DataCoverage,
 		CategoryCoverage:     input.CategoryCoverage,
 		SynthesisEvidence:    input.SynthesisEvidence,
 		CrossCuttingEvidence: input.CrossCuttingEvidence,
+		BehavioralEvidence:   append([]model.BehavioralEvidence{}, input.BehavioralEvidence...),
 		Metadata: model.Metadata{
 			Repository:     repositoryURL(input.Repo),
 			Version:        valueOr(input.CommitSHA, "Unknown"),
@@ -225,7 +226,9 @@ func Input(input model.Input, options Options) model.Document {
 		for _, rule := range role.Rules {
 			document.ClusterRoles = append(document.ClusterRoles, model.ClusterRoleRow{
 				Name: canonicalDashboardResource(role.Name), APIGroup: strings.Join(unique(rule.APIGroups), ", "),
-				Resources: strings.Join(unique(rule.Resources), ", "), Verbs: strings.Join(unique(rule.Verbs), ", "),
+				Resources:       strings.Join(unique(rule.Resources), ", "),
+				NonResourceURLs: strings.Join(unique(rule.NonResourceURLs), ", "),
+				Verbs:           strings.Join(unique(rule.Verbs), ", "),
 			})
 		}
 		sources.add(role.Source, "Security")
@@ -343,6 +346,9 @@ func Input(input model.Input, options Options) model.Document {
 			Policy: authentication.Policy,
 		})
 		sources.add(authentication.Source, "Security")
+	}
+	for _, behavior := range input.BehavioralEvidence {
+		sources.add(behavior.Source, "Behavioral Evidence")
 	}
 	document.SecurityEvidence = append(document.SecurityEvidence, input.SecurityEvidence...)
 	for _, evidence := range input.SecurityEvidence {
@@ -596,7 +602,7 @@ func sortDocument(document *model.Document) {
 	})
 	document.ClusterRoles = mergeClusterRoleRows(document.ClusterRoles)
 	document.ClusterRoles = dedupe(document.ClusterRoles, func(row model.ClusterRoleRow) string {
-		return row.Name + "\x00" + row.APIGroup + "\x00" + row.Resources + "\x00" + row.Verbs
+		return row.Name + "\x00" + row.APIGroup + "\x00" + row.Resources + "\x00" + row.NonResourceURLs + "\x00" + row.Verbs
 	})
 	document.RoleBindings = dedupe(document.RoleBindings, func(row model.RoleBindingRow) string {
 		return row.Name + "\x00" + row.Namespace + "\x00" + row.Role + "\x00" + row.ServiceAccount
@@ -732,7 +738,15 @@ func mergeClusterRoleRows(items []model.ClusterRoleRow) []model.ClusterRoleRow {
 	positions := map[string]int{}
 	result := make([]model.ClusterRoleRow, 0, len(items))
 	for _, item := range items {
-		key := item.Name + "\x00" + item.APIGroup + "\x00" + item.Verbs
+		kind := "legacy"
+		if item.Resources != "" && item.NonResourceURLs != "" {
+			kind = "mixed"
+		} else if item.Resources != "" {
+			kind = "resource"
+		} else if item.NonResourceURLs != "" {
+			kind = "non-resource"
+		}
+		key := item.Name + "\x00" + kind + "\x00" + item.APIGroup + "\x00" + item.Verbs
 		position, exists := positions[key]
 		if !exists {
 			positions[key] = len(result)
@@ -744,6 +758,11 @@ func mergeClusterRoleRows(items []model.ClusterRoleRow) []model.ClusterRoleRow {
 			strings.Split(item.Resources, ", ")...,
 		)
 		result[position].Resources = strings.Join(unique(resources), ", ")
+		urls := append(
+			strings.Split(result[position].NonResourceURLs, ", "),
+			strings.Split(item.NonResourceURLs, ", ")...,
+		)
+		result[position].NonResourceURLs = strings.Join(unique(urls), ", ")
 	}
 	return result
 }
@@ -804,10 +823,18 @@ func newSourceIndex() *sourceIndex {
 
 func (index *sourceIndex) add(raw, section string) {
 	file, line := splitSource(raw)
-	index.addWithLine(file, parseLine(line), section)
+	index.addWithRange(file, line, section)
 }
 
 func (index *sourceIndex) addWithLine(file string, line int, section string) {
+	lineValue := ""
+	if line > 0 {
+		lineValue = strconv.Itoa(line)
+	}
+	index.addWithRange(file, lineValue, section)
+}
+
+func (index *sourceIndex) addWithRange(file, line, section string) {
 	file = strings.TrimSpace(file)
 	if file == "" {
 		return
@@ -817,8 +844,8 @@ func (index *sourceIndex) addWithLine(file string, line int, section string) {
 		entry = &sourceEntry{lines: map[string]bool{}, sections: map[string]bool{}}
 		index.items[file] = entry
 	}
-	if line > 0 {
-		entry.lines[strconv.Itoa(line)] = true
+	if line != "" {
+		entry.lines[line] = true
 	}
 	for _, part := range strings.Split(section, ",") {
 		if part = strings.TrimSpace(part); part != "" {
@@ -850,15 +877,25 @@ func splitSource(source string) (string, string) {
 	if position < 0 {
 		return source, ""
 	}
-	if _, err := strconv.Atoi(source[position+1:]); err != nil {
+	lineRange := source[position+1:]
+	parts := strings.Split(lineRange, "-")
+	if len(parts) > 2 || len(parts) == 0 {
 		return source, ""
 	}
-	return source[:position], source[position+1:]
-}
-
-func parseLine(line string) int {
-	value, _ := strconv.Atoi(line)
-	return value
+	for _, part := range parts {
+		line, err := strconv.Atoi(part)
+		if err != nil || line < 1 {
+			return source, ""
+		}
+	}
+	if len(parts) == 2 {
+		start, _ := strconv.Atoi(parts[0])
+		end, _ := strconv.Atoi(parts[1])
+		if end < start {
+			return source, ""
+		}
+	}
+	return source[:position], lineRange
 }
 
 func buildRepoLineage(input model.Input, componentMap *model.ComponentMap) []model.RepoLineageRow {
@@ -983,7 +1020,7 @@ func lookupRepoKey(input model.Input, componentMap *model.ComponentMap) string {
 	if componentMap == nil || componentMap.Provenance == nil {
 		return ""
 	}
-	comp, ok := componentMap.Components[input.Component]
+	comp, ok := componentMap.Components[componentMapKey(input, componentMap)]
 	if ok && comp.RepoOrg != "" && comp.RepoName != "" {
 		key := comp.RepoOrg + "/" + comp.RepoName
 		if _, ok := componentMap.Provenance.Repos[key]; ok {
@@ -998,4 +1035,39 @@ func lookupRepoKey(input model.Input, componentMap *model.ComponentMap) string {
 		}
 	}
 	return ""
+}
+
+func componentMapKey(input model.Input, componentMap *model.ComponentMap) string {
+	if componentMap == nil {
+		return input.Component
+	}
+	if _, ok := componentMap.Components[input.Component]; ok {
+		return input.Component
+	}
+
+	repoKey := repositoryIdentity(input.Repo)
+	if repoKey == "" {
+		return input.Component
+	}
+	candidates := make([]string, 0, 1)
+	for key, component := range componentMap.Components {
+		identity := strings.Trim(component.RepoOrg+"/"+component.RepoName, "/")
+		if identity == repoKey || repositoryIdentity(component.RepoURL) == repoKey {
+			candidates = append(candidates, key)
+		}
+	}
+	if len(candidates) != 1 {
+		return input.Component
+	}
+	return candidates[0]
+}
+
+func repositoryIdentity(repository string) string {
+	repository = strings.TrimSpace(strings.TrimSuffix(repository, ".git"))
+	repository = strings.TrimSuffix(repository, "/")
+	repository = strings.TrimPrefix(repository, "https://github.com/")
+	repository = strings.TrimPrefix(repository, "http://github.com/")
+	repository = strings.TrimPrefix(repository, "ssh://git@github.com/")
+	repository = strings.TrimPrefix(repository, "git@github.com:")
+	return repository
 }

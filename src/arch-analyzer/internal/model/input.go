@@ -49,6 +49,7 @@ type Input struct {
 	RuntimeSecurity         []RuntimeSecurityControl          `json:"runtime_security_controls,omitempty"`
 	RuntimeProxies          []RuntimeProxyControl             `json:"runtime_proxy_controls,omitempty"`
 	RuntimeWebhooks         []RuntimeWebhookServer            `json:"runtime_webhook_servers,omitempty"`
+	BehavioralEvidence      []BehavioralEvidence              `json:"behavioral_evidence"`
 	AccessPolicies          []AccessPolicy                    `json:"access_policies,omitempty"`
 	InfrastructureResources []InfrastructureResource          `json:"infrastructure_resources,omitempty"`
 	DataCoverage            map[string]string                 `json:"data_coverage"`
@@ -59,6 +60,18 @@ type Input struct {
 	CrossCuttingEvidence    map[string][]CrossCuttingEvidence `json:"cross_cutting_evidence,omitempty"`
 	GapEvidenceIndex        map[string][]GapEvidenceCandidate `json:"gap_evidence_index,omitempty"`
 	ContextContract         *ContextContract                  `json:"context_contract,omitempty"`
+	ScanStatistics          []ScanStatistic                   `json:"scan_statistics,omitempty"`
+}
+
+// ScanStatistic is an audit diagnostic about bounded extractor work. It is
+// retained in analyzer JSON but is not an architectural fact or synthesis
+// input. The extractor source identity remains a separate compatibility gate.
+type ScanStatistic struct {
+	Category string `json:"category"`
+	Metric   string `json:"metric"`
+	Value    int    `json:"value"`
+	Unit     string `json:"unit"`
+	Scope    string `json:"scope"`
 }
 
 // CategoryCoverage records whether a bounded discovery contract completed for one
@@ -220,6 +233,24 @@ type RuntimeWebhookServer struct {
 	Source      string `json:"source"`
 }
 
+// BehavioralEvidence retains bounded source behavior that cannot be represented
+// faithfully by a generic endpoint, watch, or dependency row. Observed records
+// require a closed literal/static proof; unresolved records preserve the exact
+// source range and limitation without promoting names into behavior claims.
+type BehavioralEvidence struct {
+	Kind                string   `json:"kind"`
+	Status              string   `json:"status"`
+	Identity            string   `json:"identity"`
+	ServingSurface      string   `json:"serving_surface,omitempty"`
+	ConfigurationBranch string   `json:"configuration_branch,omitempty"`
+	EnforcementProvider string   `json:"enforcement_provider,omitempty"`
+	WatchedGVK          string   `json:"watched_gvk,omitempty"`
+	LiteralValues       []string `json:"literal_values,omitempty"`
+	EventTarget         string   `json:"event_target,omitempty"`
+	Source              string   `json:"source"`
+	Limitations         []string `json:"limitations,omitempty"`
+}
+
 type AccessPolicy struct {
 	Name           string            `json:"name"`
 	Kind           string            `json:"kind"`
@@ -374,10 +405,11 @@ type Role struct {
 }
 
 type RoleRule struct {
-	APIGroups     []string `json:"apiGroups"`
-	Resources     []string `json:"resources"`
-	ResourceNames []string `json:"resourceNames,omitempty"`
-	Verbs         []string `json:"verbs"`
+	APIGroups       []string `json:"apiGroups"`
+	Resources       []string `json:"resources"`
+	NonResourceURLs []string `json:"nonResourceURLs,omitempty"`
+	ResourceNames   []string `json:"resourceNames,omitempty"`
+	Verbs           []string `json:"verbs"`
 }
 
 type Binding struct {
@@ -618,6 +650,11 @@ func DecodeInput(reader io.Reader) (Input, error) {
 }
 
 func EncodeInput(writer io.Writer, input Input) error {
+	// Presence distinguishes a current extractor that found no applicable
+	// behavior from legacy analyzer output that predates behavioral evidence.
+	if input.BehavioralEvidence == nil {
+		input.BehavioralEvidence = []BehavioralEvidence{}
+	}
 	encoder := json.NewEncoder(writer)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(input); err != nil {

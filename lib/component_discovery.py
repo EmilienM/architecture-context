@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from lib.manifest_parser import ComponentInfo
+from lib.repo_naming import extra_repo_checkout_name
 
 
 def _detect_checkout_branch(checkout_path: Path) -> Optional[str]:
@@ -155,6 +156,7 @@ def read_component_map(
             shipped=comp_data.get("shipped"),
             architecturally_significant=comp_data.get("architecturally_significant"),
             confidence=comp_data.get("confidence"),
+            lineage=comp_data.get("lineage"),
         )
 
     return components
@@ -272,10 +274,18 @@ def apply_platform_overrides(
             if repo_org:
                 suffix = platform_config.get("suffix")
                 org_dir = f"{repo_org}.{suffix}" if suffix else repo_org
+                checkout_name = extra_repo_checkout_name(
+                    platform_config, repo_org, repo_name,
+                )
                 for candidate_dir in [org_dir, repo_org]:
-                    candidate = Path(checkouts_base) / candidate_dir / repo_name
-                    if candidate.exists():
-                        checkout_path = candidate
+                    for local_name in (checkout_name, repo_name):
+                        candidate = (
+                            Path(checkouts_base) / candidate_dir / local_name
+                        )
+                        if candidate.exists():
+                            checkout_path = candidate
+                            break
+                    if checkout_path:
                         break
 
             components[key] = ComponentInfo(

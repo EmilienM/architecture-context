@@ -12,7 +12,7 @@
 ##                       (optional; defaults to branch name, then directory name)
 ##   orgs              - primary GitHub orgs to clone (list of strings)
 ##   extra_orgs        - additional orgs (list of {org, branch?, suffix?, protocol?})
-##   extra_repos       - individual cross-org repos (list of {org, repo, branch?, suffix?, protocol?})
+##   extra_repos       - individual cross-org repos (list of {org, repo, branch?, suffix?, protocol?, name_prefix?})
 ##   exclude_repos     - repos to skip during fetch (supports globs)
 ##
 ## Component map override fields (applied after discovery):
@@ -29,6 +29,7 @@
 ##
 ## Per extra_repos entry:
 ##   exclude_files         - files/dirs to delete after cloning (list of glob patterns)
+##   name_prefix           - optional prefix for the local checkout/component alias
 ##
 ## Use YAML anchors (&name / *name) to share config across entries.
 
@@ -45,11 +46,24 @@ _rhoai_common: &rhoai_common
     - org: project-codeflare
       repo: codeflare-sdk
   exclude_repos:
+    - "*-template"
+    - "*.github"
+    - "*.github.io"
+    - "*benchmarks"
+    - "*demos"
+    - "*-demo"
     - "*-docs"
     - "*-design"
+    - "*enhancements"
     - "*/test-infra"
   exclude_components:
+    - RHOAI-Build-Config
+    - rhaii-cluster-validation
+    - rhods-devops-infra
     - opendatahub-operator
+    - llm-d-infra
+    - konflux-central
+    - .project
   post_checkout:
     - repo: models-perf-benchmark-data
       exclude_files:
@@ -128,18 +142,23 @@ rhoai.next:
     - org: praxis-proxy
       repo: proxy
       branch: main
+      name_prefix: praxis-
     - org: praxis-proxy
       repo: ai
       branch: main
+      name_prefix: praxis-
     - org: praxis-proxy
       repo: grid
       branch: main
+      name_prefix: praxis-
     - org: praxis-proxy
       repo: policy
       branch: main
+      name_prefix: praxis-
     - org: praxis-proxy
       repo: enhancements
       branch: main
+      name_prefix: praxis-
     - org: openshift
       repo: kueue-operator
       branch: "release-4.*"
@@ -173,6 +192,135 @@ rhoai.next:
       repo_org: openshift
       repo_name: kueue-operator
       type: operator
+
+rhoai-3.6-ea.2:
+  <<: *rhoai_3x_common
+  suffix: rhoai-3.6-ea.2
+  branch: rhoai-3.6-ea.2
+  extra_repos:
+    - org: project-codeflare
+      repo: codeflare-sdk
+    - org: opendatahub-io
+      repo: kubeflow-sdk
+    - org: IBM
+      repo: ai4rag
+    - org: Red-Hat-AI-Innovation-Team
+      repo: training_hub
+    - org: opendatahub-io
+      repo: rhoai-mcp
+      branch: main
+    - org: llm-d-incubation
+      repo: llm-d-planner
+      branch: main
+    - org: praxis-proxy
+      repo: proxy
+      branch: main
+      name_prefix: praxis-
+    - org: praxis-proxy
+      repo: ai
+      branch: main
+      name_prefix: praxis-
+    - org: praxis-proxy
+      repo: grid
+      branch: main
+      name_prefix: praxis-
+    - org: praxis-proxy
+      repo: policy
+      branch: main
+      name_prefix: praxis-
+    - org: praxis-proxy
+      repo: enhancements
+      branch: main
+      name_prefix: praxis-
+    - org: openshift
+      repo: kueue-operator
+      branch: "release-4.*"
+    - org: red-hat-data-services
+      repo: models-perf-benchmark-data
+      protocol: ssh
+      exclude_files:
+        - "data/"
+  include_components:
+    - key: ai4rag
+      repo_org: IBM
+      repo_name: ai4rag
+      type: library
+    - key: codeflare-sdk
+      repo_org: project-codeflare
+      repo_name: codeflare-sdk
+      type: shared_library
+    - key: kubeflow-sdk
+      repo_org: opendatahub-io
+      repo_name: kubeflow-sdk
+      type: shared_library
+    - key: training-hub
+      repo_org: Red-Hat-AI-Innovation-Team
+      repo_name: training_hub
+      type: library
+    #- key: rhoai-mcp
+    #  repo_org: opendatahub-io
+    #  repo_name: rhoai-mcp
+    #  type: service
+    - key: kueue-operator
+      repo_org: openshift
+      repo_name: kueue-operator
+      type: operator
+    #- key: openshell
+    #  repo_org: red-hat-data-services
+    #  repo_name: openshell
+    - key: llm-d
+      repo_org: llm-d
+      repo_name: llm-d
+      type: service
+    #- key: llm-d-async
+    #  repo_org: red-hat-data-services
+    #  repo_name: llm-d-async
+    #- key: llm-d-autoscaling
+    #  repo_org: llm-d
+    #  repo_name: llm-d-autoscaling
+    #  type: null
+    #- key: llm-d-batch-gateway
+    #  repo_org: llm-d
+    #  repo_name: llm-d-batch-gateway
+    #- key: llm-d-batch-gateway-operator
+    #  repo_org: red-hat-data-services
+    #  repo_name: llm-d-batch-gateway-operator
+    - key: llm-d-inference-payload-processor
+      repo_org: llm-d
+      repo_name: llm-d-inference-payload-processor
+      type: plugin
+    #- key: llm-d-kv-cache
+    #  repo_org: llm-d
+    #  repo_name: llm-d-kv-cache
+    #- key: llm-d-latency-predictor
+    #  repo_org: red-hat-data-services
+    #  repo_name: llm-d-latency-predictor
+    - key: llm-d-planner
+      repo_org: llm-d-incubation
+      repo_name: llm-d-planner
+      type: service
+    #- key: llm-d-router
+    #  repo_org: red-hat-data-services
+    #  repo_name: llm-d-router
+    #- key: llm-d-routing-sidecar
+    #  repo_org: llm-d
+    #  repo_name: llm-d-routing-sidecar
+    - key: praxis-ai
+      repo_org: praxis-proxy
+      repo_name: ai
+      type: service
+    #- key: praxis-enhancements
+    #  repo_org: praxis-proxy
+    #  repo_name: enhancements
+    #  type: null
+    - key: praxis-grid
+      repo_org: praxis-proxy
+      repo_name: grid
+      type: operator
+    - key: praxis-policy
+      repo_org: praxis-proxy
+      repo_name: policy
+      type: library
 
 rhoai-3.6-ea.1:
   <<: *rhoai_3x_common
